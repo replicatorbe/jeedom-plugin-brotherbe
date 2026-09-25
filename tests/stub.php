@@ -55,14 +55,25 @@ class cmd {
     public function setIsHistorized($_v) { $this->_isHistorized = $_v; }
     public function getIsHistorized() { return $this->_isHistorized; }
     public $_order = 0;
-    public function setOrder($_v) { $this->_order = $_v; }
+    public function setOrder($_v) { $this->_order = (int) $_v; }
     public function getOrder() { return $this->_order; }
     public function setUnite($_v) { $this->_unite = $_v; }
     public function getUnite() { return $this->_unite; }
     public function setTemplate($_k, $_v) { $this->_template[$_k] = $_v; }
+    public $_alert = array();
+    public $_config = array();
+    public $_saves = 0;
+    public function setAlert($_k, $_v) { $this->_alert[$_k] = $_v; }
+    public function getAlert($_k = '', $_default = '') { return isset($this->_alert[$_k]) ? $this->_alert[$_k] : $_default; }
+    public function setConfiguration($_k, $_v) { $this->_config[$_k] = $_v; }
+    public function getConfiguration($_k = '', $_default = '') { return isset($this->_config[$_k]) ? $this->_config[$_k] : $_default; }
     public function getEqLogic() { return null; }
     public function save() {
+        $this->_saves++;
         self::$registry[$this->_eqLogicId][$this->_logicalId] = $this;
+    }
+    public static function byEqLogicId($_eqLogicId) {
+        return isset(self::$registry[$_eqLogicId]) ? array_values(self::$registry[$_eqLogicId]) : array();
     }
     public static function byEqLogicIdCmdName($_eqLogicId, $_name) {
         if (!isset(self::$registry[$_eqLogicId])) {

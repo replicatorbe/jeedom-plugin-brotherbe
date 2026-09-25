@@ -1,7 +1,7 @@
 {
     "id": "brotherbe",
     "name": "Brother",
-    "pluginVersion": "0.1",
+    "pluginVersion": "0.2",
     "description": {
         "fr_FR": "Surveille en réseau local les imprimantes Brother, laser comme jet d'encre, par SNMP, sans cloud, sans compte et sans dépendance à installer. Le plugin crée pour chaque imprimante les commandes qu'elle déclare réellement : niveau de toner ou d'encre par couleur, durée de vie restante du tambour et des autres pièces d'usure, pages restantes avant entretien, compteurs de pages, recto verso et couleur, texte affiché à l'écran, état d'impression et erreurs détectées (papier, bourrage, capot ouvert). Une tuile résume le tout sur le dashboard, et chaque valeur s'utilise dans les scénarios pour être prévenu avant la panne de toner.",
         "en_US": "Monitors Brother printers, laser and inkjet alike, over the local network through SNMP, with no cloud, no account and no dependency to install. For each printer the plugin creates the commands it actually reports: toner or ink level per colour, remaining life of the drum and other wear parts, pages left before maintenance, page counters including duplex and colour, the text shown on the display, printing state and detected errors (paper, jam, cover open). A tile sums it all up on the dashboard, and every value can be used in scenarios to be warned before running out of toner."

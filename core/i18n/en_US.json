@@ -50,6 +50,8 @@
         "Magenta": "Magenta",
         "Noir": "Black",
         "Pages couleur": "Colour pages",
+        "Pages du jour": "Pages today",
+        "Pages du mois": "Pages this month",
         "Pages imprimées": "Printed pages",
         "Pages noir et blanc": "Black and white pages",
         "Pages recto verso": "Duplex pages",
@@ -219,25 +221,27 @@
         "trouvée": "found"
     },
     "plugins/brotherbe/core/template/dashboard/cmd.info.string.brotherbe.html": {
+        "Ce jour": "Today",
+        "Ce mois": "This month",
         "En attente du premier relevé": "Waiting for the first poll",
         "Imprimante": "Printer",
         "Imprimante injoignable": "Printer unreachable",
         "Masque les compteurs de pages": "Hides the page counters",
-        "Pages": "Pages",
-        "Recto verso": "Duplex",
         "Seuil en pour cent sous lequel un consommable passe en rouge": "Percentage threshold below which a supply turns red",
         "Tambour": "Drum",
+        "Total": "Total",
         "p. restantes": "p. left"
     },
     "plugins/brotherbe/core/template/mobile/cmd.info.string.brotherbe.html": {
+        "Ce jour": "Today",
+        "Ce mois": "This month",
         "En attente du premier relevé": "Waiting for the first poll",
         "Imprimante": "Printer",
         "Imprimante injoignable": "Printer unreachable",
         "Masque les compteurs de pages": "Hides the page counters",
-        "Pages": "Pages",
-        "Recto verso": "Duplex",
         "Seuil en pour cent sous lequel un consommable passe en rouge": "Percentage threshold below which a supply turns red",
         "Tambour": "Drum",
+        "Total": "Total",
         "p. restantes": "p. left"
     }
 }

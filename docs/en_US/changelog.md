@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.2
+
+- Default alert thresholds on supplies: warning below 20 % and danger below
+  10 % for toner and ink, warning below 10 % and danger below 5 % for the drum
+  and other wear parts. Set once on existing commands, never overriding a
+  threshold set by hand.
+- New "Pages today" and "Pages this month" commands, reset at midnight and on
+  the 1st, even when the printer is off. Shown on the tile.
+- Polling every minute while an error is reported (paper, jam…), back to the
+  chosen interval afterwards.
+
 ## 0.1
 
 First release.

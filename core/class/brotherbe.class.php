@@ -36,6 +36,11 @@ require_once __DIR__ . '/brotherbeSnmp.class.php';
  */
 class brotherbe extends eqLogic {
 
+    /* Vrai quand une commande a été créée depuis le chargement de l'objet, et
+     * jusqu'à postAjax(). Souligné initial obligatoire : sans lui, DB::save()
+     * prendrait la propriété pour une colonne de la table eqLogic. */
+    private $_cmdCreated = false;
+
     /* ============================================================= LES OID */
 
     const OID_CHARSET        = '1.3.6.1.2.1.43.7.1.1.4.1.1';
@@ -80,6 +85,17 @@ class brotherbe extends eqLogic {
     /* L'horloge de l'imprimante et celle de Jeedom dérivent l'une de l'autre :
      * en deçà de cet écart, la date de démarrage recalculée est la même. */
     const BOOT_TOLERANCE = 120;
+
+    /* Pendant une erreur (papier, bourrage…), on relève chaque minute, quel
+     * que soit l'intervalle choisi : l'erreur doit s'effacer du dashboard dès
+     * qu'on a rechargé le bac, pas cinq minutes plus tard. */
+    const ERROR_INTERVAL = 60;
+
+    /* Seuils d'alerte posés à la création des commandes en pour cent. Le toner
+     * et l'encre se commandent : on prévient tôt. Les pièces d'usure durent des
+     * dizaines de milliers de pages : on ne prévient qu'à l'approche de la fin. */
+    const ALERTS_SUPPLY = array('warning' => 20, 'danger' => 10);
+    const ALERTS_WEAR   = array('warning' => 10, 'danger' => 5);
 
     /* ======================================================= LES TABLES */
 
@@ -361,6 +377,20 @@ class brotherbe extends eqLogic {
         }
     }
 
+    /*
+     * Appelé par le coeur après une sauvegarde depuis la page, une fois qu'il
+     * a renuméroté de 0 à n les commandes du formulaire. Celles que postSave()
+     * vient de créer n'étaient pas dans le formulaire : elles gardent leur
+     * numéro, qui se retrouve en double avec une commande renumérotée. On
+     * rétablit l'ordre après coup.
+     */
+    public function postAjax() {
+        if ($this->_cmdCreated) {
+            $this->reorderCommands();
+            $this->_cmdCreated = false;
+        }
+    }
+
     public function isConfigured() {
         return trim((string) $this->getConfiguration('ip', '')) !== '';
     }
@@ -383,6 +413,7 @@ class brotherbe extends eqLogic {
             return $cmd;
         }
 
+        $this->_cmdCreated = true;
         $cmd = new brotherbeCmd();
         $cmd->setEqLogic_id($this->getId());
         $cmd->setLogicalId($_logicalId);
@@ -409,8 +440,35 @@ class brotherbe extends eqLogic {
             $cmd->setTemplate('dashboard', $_options['template']);
             $cmd->setTemplate('mobile', $_options['template']);
         }
+        if (!empty($_options['alerts'])) {
+            self::applyAlerts($cmd, $_options['alerts']);
+        }
         $cmd->save();
         return $cmd;
+    }
+
+    /*
+     * Les seuils sont ceux du coeur : la commande passe en « warning » puis en
+     * « danger », ce qui colore son widget, alimente les alertes de Jeedom et
+     * se règle ensuite dans la configuration avancée de la commande.
+     */
+    private static function applyAlerts($_cmd, $_levels) {
+        $_cmd->setAlert('warningif', '#value# <= ' . (int) $_levels['warning']);
+        $_cmd->setAlert('dangerif', '#value# <= ' . (int) $_levels['danger']);
+        /* Posés une fois : un seuil que l'utilisateur aura vidé ne doit pas
+         * revenir au prochain enregistrement. */
+        $_cmd->setConfiguration('brotherbe_alerts', 1);
+    }
+
+    /* Les seuils qui conviennent à une commande, ou null. */
+    public static function alertsFor($_logicalId, $_unit) {
+        if ($_unit !== '%') {
+            return null;
+        }
+        if (strpos($_logicalId, 'toner_') === 0 || strpos($_logicalId, 'encre_') === 0) {
+            return self::ALERTS_SUPPLY;
+        }
+        return self::ALERTS_WEAR;
     }
 
     /*
@@ -418,14 +476,17 @@ class brotherbe extends eqLogic {
      * dernière réponse a fait connaître. Les secondes sont mémorisées dans le
      * cache : sans cela, un enregistrement fait pendant que l'imprimante est
      * éteinte ne saurait plus lesquelles créer.
-     */
-    /*
-     * L'ordre se fixe par plages, pas par un compteur : les commandes de
-     * consommables naissent au premier relevé, après les commandes fixes, et
-     * un compteur leur donnerait les numéros déjà pris par « En ligne » et
-     * « Rafraîchir », qui se retrouveraient au milieu de la liste.
+     *
+     * Les numéros d'ordre posés ici ne servent qu'à la création ; l'ordre
+     * final est rétabli par reorderCommands().
      */
     public function createCommands() {
+        /* On distingue « créée pendant cet appel », qui réordonne tout de
+         * suite, de « créée depuis le chargement de l'objet », que postAjax()
+         * consulte : sans cela, chaque appel suivant réordonnerait et
+         * défairait un ordre choisi à la main. */
+        $createdBefore = $this->_cmdCreated;
+        $this->_cmdCreated = false;
         $order = 0;
 
         $this->addCmdIfMissing('resume', 'Imprimante', 'info', 'string', array(
@@ -445,8 +506,29 @@ class brotherbe extends eqLogic {
             if (!in_array($key, $known, true)) {
                 continue;
             }
-            $this->addCmdIfMissing($definition[0], $definition[1], 'info', 'numeric', array(
-                'order' => $order, 'isHistorized' => 1, 'unite' => $definition[2],
+            $alerts = self::alertsFor($definition[0], $definition[2]);
+            $cmd = $this->addCmdIfMissing($definition[0], $definition[1], 'info', 'numeric', array(
+                'order' => $order, 'isHistorized' => 1, 'unite' => $definition[2], 'alerts' => $alerts,
+            ));
+            /* Rattrapage des commandes créées avant les seuils : une seule
+             * fois, et seulement si l'utilisateur n'en a posé aucun. */
+            if ($alerts !== null && (int) $cmd->getConfiguration('brotherbe_alerts', 0) !== 1) {
+                if ($cmd->getAlert('warningif') == '' && $cmd->getAlert('dangerif') == '') {
+                    self::applyAlerts($cmd, $alerts);
+                } else {
+                    $cmd->setConfiguration('brotherbe_alerts', 1);
+                }
+                $cmd->save();
+            }
+        }
+
+        /* Déduits du compteur de pages, donc créés avec lui. */
+        if (in_array('page_counter', $known, true)) {
+            $this->addCmdIfMissing('pages_jour', 'Pages du jour', 'info', 'numeric', array(
+                'order' => 90, 'isHistorized' => 1, 'unite' => 'pages',
+            ));
+            $this->addCmdIfMissing('pages_mois', 'Pages du mois', 'info', 'numeric', array(
+                'order' => 91, 'isHistorized' => 1, 'unite' => 'pages',
             ));
         }
 
@@ -458,6 +540,52 @@ class brotherbe extends eqLogic {
         $this->addCmdIfMissing('rafraichir', 'Rafraîchir', 'action', 'other', array(
             'order' => $order++, 'isVisible' => 1,
         ));
+
+        if ($this->_cmdCreated) {
+            $this->reorderCommands();
+        }
+        $this->_cmdCreated = $this->_cmdCreated || $createdBefore;
+    }
+
+    /*
+     * Remet les commandes dans l'ordre du plugin. Nécessaire parce que la page
+     * de l'équipement renumérote toutes les commandes de 0 à n à chaque
+     * sauvegarde, selon leur rang dans le tableau : les plages fixes n'y
+     * survivent pas, et une commande née ensuite — « Pages du jour » au
+     * premier relevé, un toner cyan le jour d'un changement de modèle —
+     * atterrirait après « Rafraîchir ». On ne le fait qu'à la création d'une
+     * commande, pour ne pas défaire à chaque relevé un ordre choisi à la main.
+     */
+    public function reorderCommands() {
+        $rank = array('resume' => 0, 'etat' => 1, 'etat_imprimante' => 2, 'etat_appareil' => 3,
+                      'en_erreur' => 4, 'erreurs' => 5);
+        $i = 10;
+        foreach (self::catalogue() as $definition) {
+            $rank[$definition[0]] = ++$i;
+        }
+        $rank['pages_jour'] = 90;
+        $rank['pages_mois'] = 91;
+        $rank['dernier_demarrage'] = 100;
+        $rank['en_ligne'] = 101;
+        $rank['rafraichir'] = 102;
+
+        /* Les commandes inconnues du plugin, ajoutées à la main, gardent leur
+         * place relative, en fin de liste. */
+        $list = array();
+        foreach (cmd::byEqLogicId($this->getId()) as $cmd) {
+            $key = isset($rank[$cmd->getLogicalId()]) ? $rank[$cmd->getLogicalId()] : 1000 + (int) $cmd->getOrder();
+            $list[] = array($key, $cmd);
+        }
+        usort($list, function ($a, $b) { return $a[0] - $b[0]; });
+
+        $order = 0;
+        foreach ($list as $item) {
+            if ((int) $item[1]->getOrder() !== $order) {
+                $item[1]->setOrder($order);
+                $item[1]->save();
+            }
+            $order++;
+        }
     }
 
     /* Rattrape les imprimantes déjà créées quand une mise à jour du plugin
@@ -742,6 +870,12 @@ class brotherbe extends eqLogic {
             $raw = static::query($this->getConfiguration('ip'), $this->getConfiguration('community', self::DEFAULT_COMMUNITY));
         } catch (Throwable $e) {
             $this->noteFailure($e->getMessage());
+            /* Une erreur papier ne se lit plus sur une imprimante injoignable :
+             * pas de raison de la relever chaque minute. */
+            $this->setCache('in_error', 0);
+            /* Minuit passe aussi pour une imprimante éteinte : ses compteurs du
+             * jour retombent à zéro, et c'est vrai, elle n'imprime pas. */
+            $this->publishPeriods($this->periods(null));
             $this->applyOffline();
             if ($_force) {
                 throw $e;
@@ -782,11 +916,16 @@ class brotherbe extends eqLogic {
                 $texts[] = isset($labels[$error]) ? $labels[$error] : $error;
             }
             $this->publishCmd('en_erreur', count($texts) > 0 ? 1 : 0);
+            $this->setCache('in_error', count($texts) > 0 ? 1 : 0);
             $this->publishCmd('erreurs', count($texts) > 0 ? implode(', ', $texts) : __('Aucune', __FILE__));
             $state['error_labels'] = $texts;
         }
         $this->publishCmd('dernier_demarrage', $this->bootDate($state['uptime']));
         $this->publishCmd('en_ligne', 1);
+
+        $periods = $this->periods(isset($decoded['values']['page_counter']) ? $decoded['values']['page_counter'] : null);
+        $this->publishPeriods($periods);
+        $this->setCache('periods', $periods);
 
         $this->setCache('values', $decoded['values']);
         $this->setCache('state', $state);
@@ -813,6 +952,61 @@ class brotherbe extends eqLogic {
         return date('Y-m-d H:i', $boot);
     }
 
+    /* ======================================================= PAGES DU JOUR */
+
+    /* L'horloge, isolée pour que les tests puissent faire passer minuit. */
+    public static function now() {
+        return time();
+    }
+
+    /*
+     * Pages imprimées depuis minuit et depuis le 1er du mois, par différence
+     * avec le compteur de l'imprimante.
+     *
+     * La référence d'une nouvelle période est le dernier compteur connu, pas
+     * le premier de la période : une imprimante éteinte toute la nuit et
+     * rallumée à 9 h n'a imprimé que ce qui dépasse le compteur de la veille,
+     * et une impression faite à 23 h 58, entre deux relevés, doit compter.
+     *
+     * Un compteur qui recule — carte mère remplacée, remise à zéro par le
+     * service — redémarre la période au lieu de rendre un nombre négatif.
+     *
+     * Sans compteur ($_counter à null, imprimante injoignable), on ne fait que
+     * changer de période si minuit est passé.
+     */
+    public function periods($_counter) {
+        $now = static::now();
+        $last = $this->getCache('last_pages', null);
+        $stamps = array('day' => date('Y-m-d', $now), 'month' => date('Y-m', $now));
+        $refs = $this->getCache('period_refs', array());
+        $result = array();
+
+        foreach ($stamps as $period => $stamp) {
+            $ref = isset($refs[$period]) ? $refs[$period] : null;
+            if ($ref === null || $ref['stamp'] !== $stamp) {
+                $ref = array('stamp' => $stamp, 'pages' => $last !== null ? (int) $last : ($_counter !== null ? (int) $_counter : null));
+            }
+            if ($_counter !== null && ($ref['pages'] === null || (int) $_counter < $ref['pages'])) {
+                $ref['pages'] = (int) $_counter;
+            }
+            $refs[$period] = $ref;
+
+            $current = $_counter !== null ? (int) $_counter : ($last !== null ? (int) $last : null);
+            $result[$period] = ($current !== null && $ref['pages'] !== null) ? $current - $ref['pages'] : null;
+        }
+
+        $this->setCache('period_refs', $refs);
+        if ($_counter !== null) {
+            $this->setCache('last_pages', (int) $_counter);
+        }
+        return $result;
+    }
+
+    private function publishPeriods($_periods) {
+        $this->publishCmd('pages_jour', $_periods['day']);
+        $this->publishCmd('pages_mois', $_periods['month']);
+    }
+
     /* ================================================================ TUILE */
 
     private function publishTile($_online) {
@@ -820,7 +1014,8 @@ class brotherbe extends eqLogic {
             $this->getCache('values', array()),
             $this->getCache('state', array()),
             $this->getCache('info', array()),
-            $_online
+            $_online,
+            $this->getCache('periods', array())
         ));
     }
 
@@ -833,7 +1028,7 @@ class brotherbe extends eqLogic {
      * minutes pour une imprimante qui dort. La durée affichée sous la tuile
      * dit alors depuis quand rien n'a changé, ce qui est l'information utile.
      */
-    public static function buildResume($_values, $_state, $_info, $_online) {
+    public static function buildResume($_values, $_state, $_info, $_online, $_periods = array()) {
         $v = is_array($_values) ? $_values : array();
         $s = is_array($_state) ? $_state : array();
         $lire = function ($_key) use ($v) {
@@ -875,7 +1070,8 @@ class brotherbe extends eqLogic {
             'errors'   => isset($s['error_labels']) ? $s['error_labels'] : array(),
             'supplies' => $supplies,
             'pages'    => $lire('page_counter'),
-            'duplex'   => $lire('duplex_unit_pages_counter'),
+            'today'    => isset($_periods['day']) ? $_periods['day'] : null,
+            'month'    => isset($_periods['month']) ? $_periods['month'] : null,
             'drum_pages' => $lire('drum_remaining_pages'),
         );
 
@@ -908,6 +1104,9 @@ class brotherbe extends eqLogic {
         $now = time();
         $last = (int) $this->getCache('polled_at', 0);
         $interval = max(1, (int) $this->getConfiguration('interval', self::DEFAULT_INTERVAL)) * 60;
+        if ((int) $this->getCache('in_error', 0) === 1) {
+            $interval = min($interval, self::ERROR_INTERVAL);
+        }
         $wait = max($interval, (int) $this->getCache('backoff', 0));
         /* Quelques secondes de marge : le cron ne passe jamais exactement à la
          * même seconde, et un intervalle de cinq minutes en ferait six. */

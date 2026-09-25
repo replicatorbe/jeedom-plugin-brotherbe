@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.2
+
+- Seuils d'alerte posés d'office sur les consommables : warning sous 20 % et
+  danger sous 10 % pour le toner et l'encre, warning sous 10 % et danger sous
+  5 % pour le tambour et les autres pièces d'usure. Les alertes natives de
+  Jeedom préviennent sans scénario. Les commandes existantes les reçoivent une
+  seule fois, et un seuil déjà réglé à la main n'est jamais écrasé.
+- Nouvelles commandes « Pages du jour » et « Pages du mois », remises à zéro à
+  minuit et le 1er du mois, même si l'imprimante est éteinte. La tuile les
+  affiche à la place du recto verso.
+- Relevé chaque minute tant qu'une erreur est signalée (papier, bourrage…) :
+  elle disparaît du dashboard dès qu'on l'a réglée. Retour à l'intervalle
+  choisi ensuite.
+
 ## 0.1
 
 Première version.

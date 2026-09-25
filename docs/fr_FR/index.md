@@ -13,7 +13,8 @@ Selon ce que votre imprimante déclare :
   et des kits d'alimentation, pages restantes avant leur remplacement,
   remplissage de la boîte de récupération d'encre.
 - **Compteurs** : pages imprimées, pages noir et blanc, couleur, recto verso,
-  compteurs par couleur, pages du tambour.
+  compteurs par couleur, pages du tambour, et les **pages du jour** et **du
+  mois**, remises à zéro à minuit et le 1er du mois.
 - **État** : texte affiché sur l'écran de l'imprimante (« Veille », « Prêt »,
   « Pas de papier »…), état d'impression (au repos, impression, préchauffage),
   état de l'appareil, date du dernier démarrage.
@@ -58,10 +59,32 @@ Dans la configuration du plugin, le **délai d'attente SNMP** (deux secondes
 par défaut, trois tentatives) peut être allongé si l'imprimante tarde à sortir
 de veille.
 
+## Alertes de consommables
+
+Les commandes en pour cent reçoivent à leur création les seuils d'alerte de
+Jeedom :
+
+| Commandes | Warning | Danger |
+|---|---|---|
+| Toner, encre | 20 % ou moins | 10 % ou moins |
+| Tambour, courroie, fusion, laser, kits, boîte de récupération | 10 % ou moins | 5 % ou moins |
+
+La commande change alors de couleur et alimente les alertes natives de Jeedom,
+sans scénario. Les seuils se modifient ou se suppriment dans la configuration
+avancée de chaque commande, onglet *Alertes* ; le plugin ne les repose jamais
+une fois retirés.
+
+## Relevé pendant une erreur
+
+Tant que l'imprimante signale une erreur — plus de papier, bourrage, capot
+ouvert… —, elle est relevée chaque minute, quel que soit l'intervalle choisi :
+l'erreur disparaît du dashboard dès qu'elle est réglée. Le rythme normal
+reprend ensuite.
+
 ## Le dashboard
 
 Une tuile unique résume l'imprimante : le texte de son écran, une barre par
-consommable — rouge sous 10 % —, le nombre de pages, les pages recto verso et
+consommable — rouge sous 10 % —, les pages du jour, du mois et le total, et
 les pages restantes du tambour. Un bandeau rouge affiche les erreurs en cours.
 Si l'imprimante ne répond plus, la tuile s'estompe et garde les dernières
 valeurs connues.

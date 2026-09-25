@@ -59,6 +59,10 @@ function block($_records) {
  * l'appel réseau par une réponse préparée. */
 class brotherbeFake extends brotherbe {
     public static $answer = null;
+    public static $clock = null;
+    public static function now() {
+        return self::$clock !== null ? self::$clock : time();
+    }
     public static function query($_ip, $_community) {
         if (self::$answer instanceof Exception) {
             throw self::$answer;
@@ -246,8 +250,75 @@ check('ordre : État, consommables, puis En ligne et Rafraîchir',
     array_keys($sorted),
     array('resume', 'etat', 'etat_imprimante', 'etat_appareil', 'en_erreur', 'erreurs',
           'toner_noir', 'tambour_restant', 'tambour_pages_restantes', 'tambour_compteur',
-          'pages', 'pages_recto_verso', 'compteur_noir',
+          'pages', 'pages_recto_verso', 'compteur_noir', 'pages_jour', 'pages_mois',
           'dernier_demarrage', 'en_ligne', 'rafraichir'));
+
+/* La page de l'équipement renumérote tout de 0 à n à chaque sauvegarde. Une
+ * commande née ensuite doit quand même trouver sa place, avant En ligne. */
+$n = 0;
+foreach ($sorted as $cmd) { $cmd->setOrder($n++); }
+unset(cmd::$registry[$eq->getId()]['pages_jour']);
+$eq->createCommands();
+$sorted = cmd::$registry[$eq->getId()];
+uasort($sorted, function ($a, $b) { return $a->getOrder() - $b->getOrder(); });
+$keys = array_keys($sorted);
+check('après renumérotation par la page : Pages du jour avant En ligne',
+    array_search('pages_jour', $keys) < array_search('en_ligne', $keys), true);
+check('ordres consécutifs, sans trou', array_map(function ($c) { return $c->getOrder(); }, array_values($sorted)), range(0, count($sorted) - 1));
+$sorted['rafraichir']->setOrder(0);
+$sorted['resume']->setOrder(15);
+$eq->createCommands();
+check('ordre choisi à la main respecté sans création', array($sorted['rafraichir']->getOrder(), $sorted['resume']->getOrder()), array(0, 15));
+$sorted['rafraichir']->setOrder(15);
+$sorted['resume']->setOrder(0);
+
+/* Le chemin exact de la page : postSave() crée des commandes, puis le coeur
+ * renumérote de 0 à n celles du formulaire — qui ne contenait que les
+ * commandes fixes —, puis appelle postAjax(). */
+$page = new brotherbeFake();
+$page->setConfiguration('ip', '192.168.1.50');
+$page->createCommands();
+$page->postAjax();
+$form = array_values(cmd::$registry[$page->getId()]);
+brotherbeFake::$answer = $raw['values'];
+$page->update();
+$n = 0;
+foreach ($form as $cmd) { $cmd->setOrder($n++); }
+$page->postAjax();
+$sorted = cmd::$registry[$page->getId()];
+uasort($sorted, function ($a, $b) { return $a->getOrder() - $b->getOrder(); });
+$keys = array_keys($sorted);
+check('page : aucun numéro en double après postAjax()', count(array_unique(array_map(function ($c) { return $c->getOrder(); }, $sorted))), count($sorted));
+check('page : Toner noir avant En ligne', array_search('toner_noir', $keys) < array_search('en_ligne', $keys), true);
+check('page : Rafraîchir en dernier', end($keys), 'rafraichir');
+
+section('Seuils d\'alerte');
+
+check('toner : warning à 20 %', $eq->getCmd('info', 'toner_noir')->getAlert('warningif'), '#value# <= 20');
+check('toner : danger à 10 %', $eq->getCmd('info', 'toner_noir')->getAlert('dangerif'), '#value# <= 10');
+check('tambour : warning à 10 %', $eq->getCmd('info', 'tambour_restant')->getAlert('warningif'), '#value# <= 10');
+check('tambour : danger à 5 %', $eq->getCmd('info', 'tambour_restant')->getAlert('dangerif'), '#value# <= 5');
+check('encre : seuils des consommables', brotherbe::alertsFor('encre_cyan', '%'), array('warning' => 20, 'danger' => 10));
+check('compteur de pages : aucun seuil', $eq->getCmd('info', 'pages')->getAlert('warningif'), '');
+check('pages restantes : aucun seuil', brotherbe::alertsFor('tambour_pages_restantes', 'pages'), null);
+
+/* Une commande créée avant les seuils les reçoit une fois ; un seuil posé par
+ * l'utilisateur n'est jamais écrasé ; un seuil vidé ne revient pas. */
+$toner = $eq->getCmd('info', 'toner_noir');
+$toner->_alert = array();
+$toner->_config = array();
+$drum = $eq->getCmd('info', 'tambour_restant');
+$drum->_alert = array('warningif' => '#value# < 30');
+$drum->_config = array();
+$eq->createCommands();
+check('rattrapage : seuils posés sur une commande ancienne', $toner->getAlert('dangerif'), '#value# <= 10');
+check('rattrapage : seuil de l\'utilisateur conservé', $drum->getAlert('warningif'), '#value# < 30');
+check('rattrapage : pas de danger ajouté à côté', $drum->getAlert('dangerif'), '');
+$toner->_alert = array();
+$saves = $toner->_saves;
+$eq->createCommands();
+check('seuil vidé par l\'utilisateur : ne revient pas', $toner->getAlert('warningif'), '');
+check('aucune réécriture inutile de la commande', $toner->_saves, $saves);
 
 $tile = json_decode($eq->_published['resume'], true);
 check('tuile : en ligne', $tile['online'], 1);
@@ -287,6 +358,70 @@ check('espacement après trois échecs', $eq->getCache('backoff', 0), 300);
 brotherbeFake::$answer = $raw['values'];
 $eq->update();
 check('retour en ligne : espacement effacé', $eq->getCache('backoff', 0), 0);
+
+section('Pages du jour et du mois');
+
+$p = new brotherbeFake();
+$p->setConfiguration('ip', '192.168.1.50');
+$p->createCommands();
+$counter = $raw['values'];
+$at = function ($_date, $_pages) use ($p, $counter) {
+    brotherbeFake::$clock = strtotime($_date);
+    if ($_pages === null) {
+        brotherbeFake::$answer = new Exception('éteinte');
+    } else {
+        $counter[brotherbe::OID_COUNTERS] = block(array('00' => $_pages));
+        brotherbeFake::$answer = $counter;
+    }
+    $p->_published = array();
+    $p->update();
+    return array(
+        isset($p->_published['pages_jour']) ? $p->_published['pages_jour'] : '-',
+        isset($p->_published['pages_mois']) ? $p->_published['pages_mois'] : '-',
+    );
+};
+check('premier relevé : zéro, pas le compteur entier', $at('2026-09-25 10:00', 34), array(0, 0));
+check('six pages dans la matinée', $at('2026-09-25 11:00', 40), array(6, 6));
+check('commandes créées avec le compteur', is_object($p->getCmd('info', 'pages_jour')), true);
+check('éteinte le lendemain : jour à zéro, mois gardé', $at('2026-09-26 09:00', null), array(0, 6));
+check('rallumée : ce qui dépasse le compteur de la veille', $at('2026-09-26 10:00', 45), array(5, 11));
+check('impression à 23 h 58 comptée le jour même', $at('2026-09-26 23:58', 47), array(7, 13));
+check('premier relevé après minuit : ce qui a suivi 23 h 58', $at('2026-09-27 00:03', 48), array(1, 14));
+check('nouveau mois', $at('2026-10-01 08:00', 50), array(2, 2));
+check('compteur qui recule : période redémarrée, pas de négatif', $at('2026-10-01 09:00', 3), array(0, 0));
+check('et repart de là', $at('2026-10-01 10:00', 8), array(5, 5));
+$tile = json_decode($p->_published['resume'], true);
+check('tuile : pages du jour et du mois', array($tile['today'], $tile['month']), array(5, 5));
+brotherbeFake::$clock = null;
+
+section('Relevé accéléré pendant une erreur');
+
+$e = new brotherbeFake();
+$e->setConfiguration('ip', '192.168.1.50');
+$e->setConfiguration('interval', 5);
+$e->createCommands();
+brotherbeFake::$answer = $raw['values'];
+$e->update();
+$e->setCache('polled_at', time() - 70);
+check('sans erreur : on attend les cinq minutes', $e->shouldPoll(), false);
+$jam = $raw['values'];
+$jam[brotherbe::OID_PRINTER_ERRORS] = "\x04";
+brotherbeFake::$answer = $jam;
+$e->update();
+$e->setCache('polled_at', time() - 70);
+check('bourrage : relevé dès la minute suivante', $e->shouldPoll(), true);
+$e->setCache('polled_at', time() - 20);
+check('bourrage : pas deux fois dans la même minute', $e->shouldPoll(), false);
+brotherbeFake::$answer = $raw['values'];
+$e->update();
+$e->setCache('polled_at', time() - 70);
+check('bourrage résolu : retour aux cinq minutes', $e->shouldPoll(), false);
+brotherbeFake::$answer = $jam;
+$e->update();
+brotherbeFake::$answer = new Exception('éteinte');
+$e->update();
+$e->setCache('polled_at', time() - 70);
+check('injoignable : plus de relevé à la minute', $e->shouldPoll(), false);
 
 section('Charge utile de la tuile');
 

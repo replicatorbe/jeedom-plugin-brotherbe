@@ -12,7 +12,7 @@ Depending on what your printer exposes:
   fuser, laser unit and paper feed kits, pages left before replacement, ink
   waste box.
 - **Counters**: printed pages, black and white, colour, duplex, per-colour
-  counters, drum pages.
+  counters, drum pages, and **pages today** and **this month**.
 - **State**: text shown on the printer display, printing state (idle,
   printing, warm-up), device state, last boot date.
 - **Errors**: no paper, jam, cover open, low or empty toner, missing tray,
@@ -41,6 +41,17 @@ address, the SNMP community (`public` by default), the technology (automatic
 detection from the model name: `L` for laser, `J` or `T` for inkjet) and the
 polling interval. **Tester l'adresse** queries the printer without saving and
 shows its model, serial number, firmware and MAC address.
+
+## Supply alerts
+
+Percentage commands get Jeedom alert thresholds when created: toner and ink
+warn at 20 % and turn danger at 10 %; drum and other wear parts at 10 % and
+5 %. Change or remove them in each command's advanced configuration.
+
+## Polling during an error
+
+While the printer reports an error (paper, jam, cover open…), it is polled
+every minute, then back to the chosen interval.
 
 ## Dashboard
 

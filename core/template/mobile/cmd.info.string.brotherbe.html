@@ -159,8 +159,9 @@
         }
 
         if (bbShowFacts) {
-          bbFact(facts, '{{Pages}}', bbNum(data.pages))
-          bbFact(facts, '{{Recto verso}}', bbNum(data.duplex))
+          bbFact(facts, '{{Ce jour}}', bbNum(data.today))
+          bbFact(facts, '{{Ce mois}}', bbNum(data.month))
+          bbFact(facts, '{{Total}}', bbNum(data.pages))
           bbFact(facts, '{{Tambour}}', bbNum(data.drum_pages) === null ? null : bbNum(data.drum_pages) + ' {{p. restantes}}')
         }
 

@@ -1,0 +1,4 @@
+# Jeux d'essai et rejeu hors ligne : outils de développement, inutiles côté
+# Jeedom. Les fixtures gardent des réponses SNMP réelles d'imprimantes Brother,
+# pour rejouer le décodage sans imprimante sous la main.
+tests/
